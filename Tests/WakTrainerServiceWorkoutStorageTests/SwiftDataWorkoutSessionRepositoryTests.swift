@@ -103,6 +103,88 @@ struct SwiftDataWorkoutSessionRepositoryTests {
         )
     }
 
+
+    @Test("completed sessions are filtered by start date range and ordered ascending")
+    func fetchesCompletedSessionsInRange() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(
+            inMemory: true
+        )
+
+        let rangeStart = Date(
+            timeIntervalSince1970: 1_800_000_000
+        )
+        let rangeEnd =
+            rangeStart.addingTimeInterval(86_400)
+
+        let before = makeSession(
+            id: UUID(),
+            startedAt:
+                rangeStart.addingTimeInterval(-1),
+            completed: true
+        )
+        let atStart = makeSession(
+            id: UUID(),
+            startedAt: rangeStart,
+            completed: true
+        )
+        let later = makeSession(
+            id: UUID(),
+            startedAt:
+                rangeStart.addingTimeInterval(3_600),
+            completed: true
+        )
+        let atEnd = makeSession(
+            id: UUID(),
+            startedAt: rangeEnd,
+            completed: true
+        )
+        let inProgress = makeSession(
+            id: UUID(),
+            startedAt:
+                rangeStart.addingTimeInterval(1_800),
+            completed: false
+        )
+
+        try await repository.saveCompleted(before)
+        try await repository.saveCompleted(atStart)
+        try await repository.saveCompleted(later)
+        try await repository.saveCompleted(atEnd)
+        try await repository.saveCheckpoint(inProgress)
+
+        let sessions =
+            try await repository.fetchCompletedSessions(
+                from: rangeStart,
+                to: rangeEnd
+            )
+
+        #expect(
+            sessions.map(\.session.id)
+                == [atStart.id, later.id]
+        )
+        #expect(
+            sessions.allSatisfy {
+                $0.persistenceState == .completed
+            }
+        )
+    }
+
+    @Test("invalid completed-session range returns empty results")
+    func invalidCompletedSessionRangeIsEmpty() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(
+            inMemory: true
+        )
+        let date = Date(
+            timeIntervalSince1970: 1_800_000_000
+        )
+
+        #expect(
+            try await repository.fetchCompletedSessions(
+                from: date,
+                to: date
+            ).isEmpty
+        )
+    }
+
     @Test("sessions can be deleted individually and all at once")
     func deletesSessions() async throws {
         let repository = try SwiftDataWorkoutSessionRepository(
