@@ -108,6 +108,38 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         .map(makeStoredSession)
     }
 
+    public func fetchCompletedSessions(
+        from startDate: Date,
+        to endDate: Date
+    ) async throws -> [StoredWorkoutSession] {
+        guard startDate < endDate else {
+            return []
+        }
+
+        let completedRawValue =
+            WorkoutSessionPersistenceState.completed.rawValue
+
+        var descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate {
+                $0.persistenceStateRawValue == completedRawValue &&
+                $0.startedAt >= startDate &&
+                $0.startedAt < endDate
+            }
+        )
+
+        descriptor.sortBy = [
+            SortDescriptor(
+                \.startedAt,
+                order: .forward
+            )
+        ]
+
+        return try modelContext.fetch(
+            descriptor
+        )
+        .map(makeStoredSession)
+    }
+
     public func deleteSession(
         id: UUID
     ) async throws {
