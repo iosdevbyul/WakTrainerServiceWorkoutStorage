@@ -21,7 +21,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/iosdevbyul/WakTrainerDomainWorkout",
-            branch: "main"
+            branch: "feat/workout-session-storage-contract"
         )
     ],
     targets: [
