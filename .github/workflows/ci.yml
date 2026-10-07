@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and Test
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift and Xcode versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Resolve package dependencies
+        run: swift package resolve
+
+      - name: Select available iPhone Simulator
+        id: simulator
+        shell: bash
+        run: |
+          SIMULATOR_ID=$(
+            xcrun simctl list devices available -j |
+            python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+
+          for runtime, devices in data["devices"].items():
+              if "iOS" not in runtime:
+                  continue
+
+              for device in devices:
+                  if (
+                      device.get("isAvailable")
+                      and device["name"].startswith("iPhone")
+                  ):
+                      print(device["udid"])
+                      sys.exit(0)
+
+          sys.exit(1)
+          '
+          )
+
+          echo "id=$SIMULATOR_ID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $SIMULATOR_ID"
+
+      - name: Build WakTrainerServiceWorkoutStorage
+        run: |
+          xcodebuild \
+            -scheme WakTrainerServiceWorkoutStorage \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run WakTrainerServiceWorkoutStorage tests
+        run: |
+          xcodebuild \
+            -scheme WakTrainerServiceWorkoutStorage \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            test
