@@ -58,7 +58,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     ) async throws -> StoredWorkoutSession? {
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
-                $0.sessionID == id
+                $0.sessionID == id && $0.ownerUserID == ownerUserID
             }
         )
 
@@ -74,7 +74,9 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func fetchSessions() async throws -> [StoredWorkoutSession] {
-        var descriptor = FetchDescriptor<WorkoutSessionEntity>()
+        var descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate { $0.ownerUserID == ownerUserID }
+        )
         descriptor.sortBy = [
             SortDescriptor(
                 \.startedAt,
@@ -94,7 +96,8 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
 
         var descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
-                $0.persistenceStateRawValue == inProgressRawValue
+                $0.persistenceStateRawValue == inProgressRawValue &&
+                $0.ownerUserID == ownerUserID
             }
         )
 
@@ -125,6 +128,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         var descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
                 $0.persistenceStateRawValue == completedRawValue &&
+                $0.ownerUserID == ownerUserID &&
                 $0.startedAt >= startDate &&
                 $0.startedAt < endDate
             }
@@ -203,9 +207,12 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func deleteAllSessions() async throws {
-        try modelContext.delete(
-            model: WorkoutSessionEntity.self
+        let descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate { $0.ownerUserID == ownerUserID }
         )
+        for entity in try modelContext.fetch(descriptor) {
+            modelContext.delete(entity)
+        }
         try modelContext.save()
     }
 }
