@@ -6,6 +6,9 @@ final class WorkoutSessionEntity {
     @Attribute(.unique)
     var sessionID: UUID
 
+    // Nil for legacy unclaimed records; never silently associate them with a login.
+    var ownerUserID: UUID?
+
     var workoutID: String
     var workoutName: String
     var startedAt: Date
@@ -17,6 +20,7 @@ final class WorkoutSessionEntity {
 
     init(
         sessionID: UUID,
+        ownerUserID: UUID? = nil,
         workoutID: String,
         workoutName: String,
         startedAt: Date,
@@ -27,6 +31,7 @@ final class WorkoutSessionEntity {
         payload: Data
     ) {
         self.sessionID = sessionID
+        self.ownerUserID = ownerUserID
         self.workoutID = workoutID
         self.workoutName = workoutName
         self.startedAt = startedAt
