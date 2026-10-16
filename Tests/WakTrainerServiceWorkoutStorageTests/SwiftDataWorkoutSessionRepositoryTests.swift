@@ -185,6 +185,34 @@ struct SwiftDataWorkoutSessionRepositoryTests {
         )
     }
 
+    @Test("completed uploads retain payload while sync states change")
+    func pendingUploadLifecycle() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(inMemory: true)
+        let completed = makeSession()
+        let incomplete = makeSession(id: UUID(), completed: false)
+
+        try await repository.saveCompleted(completed)
+        try await repository.saveCheckpoint(incomplete)
+
+        #expect(try await repository.fetchPendingUploads().map(\.session.id) == [completed.id])
+
+        try await repository.updateSyncState(for: completed.id, to: .failed)
+        #expect(try await repository.fetchPendingUploads().count == 1)
+
+        try await repository.updateSyncState(for: completed.id, to: .synced)
+        #expect(try await repository.fetchPendingUploads().isEmpty)
+        let stored = try #require(try await repository.fetchSession(id: completed.id))
+        #expect(stored.session == completed)
+        #expect(stored.syncState == .synced)
+
+        await #expect(throws: WorkoutStorageError.sessionNotCompleted) {
+            try await repository.updateSyncState(for: incomplete.id, to: .synced)
+        }
+        await #expect(throws: WorkoutStorageError.sessionNotFound) {
+            try await repository.updateSyncState(for: UUID(), to: .synced)
+        }
+    }
+
     @Test("sessions can be deleted individually and all at once")
     func deletesSessions() async throws {
         let repository = try SwiftDataWorkoutSessionRepository(
