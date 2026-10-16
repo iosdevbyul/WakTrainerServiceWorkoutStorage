@@ -140,6 +140,40 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         .map(makeStoredSession)
     }
 
+    /// Returns only completed sessions that still require a server upload.
+    public func fetchPendingUploads() async throws -> [StoredWorkoutSession] {
+        let completed = WorkoutSessionPersistenceState.completed.rawValue
+        let synced = WorkoutSessionSyncState.synced.rawValue
+        var descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate {
+                $0.persistenceStateRawValue == completed &&
+                $0.syncStateRawValue != synced
+            }
+        )
+        descriptor.sortBy = [SortDescriptor(\.startedAt, order: .forward)]
+        return try modelContext.fetch(descriptor).map(makeStoredSession)
+    }
+
+    /// Changes sync metadata without altering the full-fidelity workout payload.
+    public func updateSyncState(
+        for sessionID: UUID,
+        to state: WorkoutSessionSyncState
+    ) async throws {
+        let descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate { $0.sessionID == sessionID }
+        )
+        guard let entity = try modelContext.fetch(descriptor).first else {
+            throw WorkoutStorageError.sessionNotFound
+        }
+        guard entity.persistenceStateRawValue ==
+                WorkoutSessionPersistenceState.completed.rawValue else {
+            throw WorkoutStorageError.sessionNotCompleted
+        }
+        entity.syncStateRawValue = state.rawValue
+        entity.updatedAt = Date()
+        try modelContext.save()
+    }
+
     public func deleteSession(
         id: UUID
     ) async throws {
@@ -244,4 +278,6 @@ private extension SwiftDataWorkoutSessionRepository {
 
 public enum WorkoutStorageError: Error, Equatable {
     case invalidStoredMetadata
+    case sessionNotFound
+    case sessionNotCompleted
 }
