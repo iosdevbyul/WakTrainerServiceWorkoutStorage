@@ -56,6 +56,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     public func fetchSession(
         id: UUID
     ) async throws -> StoredWorkoutSession? {
+        let ownerUserID = self.ownerUserID
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
                 $0.sessionID == id && $0.ownerUserID == ownerUserID
@@ -74,6 +75,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func fetchSessions() async throws -> [StoredWorkoutSession] {
+        let ownerUserID = self.ownerUserID
         var descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate { $0.ownerUserID == ownerUserID }
         )
@@ -91,6 +93,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func fetchIncompleteSessions() async throws -> [StoredWorkoutSession] {
+        let ownerUserID = self.ownerUserID
         let inProgressRawValue =
             WorkoutSessionPersistenceState.inProgress.rawValue
 
@@ -118,6 +121,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         from startDate: Date,
         to endDate: Date
     ) async throws -> [StoredWorkoutSession] {
+        let ownerUserID = self.ownerUserID
         guard startDate < endDate else {
             return []
         }
@@ -191,6 +195,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     public func deleteSession(
         id: UUID
     ) async throws {
+        let ownerUserID = self.ownerUserID
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
                 $0.sessionID == id
@@ -207,6 +212,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func deleteAllSessions() async throws {
+        let ownerUserID = self.ownerUserID
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate { $0.ownerUserID == ownerUserID }
         )
