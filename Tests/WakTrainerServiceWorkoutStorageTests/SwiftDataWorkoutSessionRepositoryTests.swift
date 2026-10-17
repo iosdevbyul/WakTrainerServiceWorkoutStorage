@@ -187,7 +187,7 @@ struct SwiftDataWorkoutSessionRepositoryTests {
 
     @Test("completed uploads retain payload while sync states change")
     func pendingUploadLifecycle() async throws {
-        let repository = try SwiftDataWorkoutSessionRepository(inMemory: true)
+        let repository = try SwiftDataWorkoutSessionRepository(inMemory: true, ownerUserID: UUID())
         let completed = makeSession()
         let incomplete = makeSession(id: UUID(), completed: false)
 
@@ -211,6 +211,18 @@ struct SwiftDataWorkoutSessionRepositoryTests {
         await #expect(throws: WorkoutStorageError.sessionNotFound) {
             try await repository.updateSyncState(for: UUID(), to: .synced)
         }
+    }
+
+    @Test("legacy sessions remain local and cannot be uploaded without an owner")
+    func legacySessionIsNotUploadable() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(inMemory: true)
+        let session = makeSession()
+        try await repository.saveCompleted(session)
+        #expect(try await repository.fetchPendingUploads().isEmpty)
+        await #expect(throws: WorkoutStorageError.accountRequired) {
+            try await repository.updateSyncState(for: session.id, to: .synced)
+        }
+        #expect(try await repository.fetchSession(id: session.id) != nil)
     }
 
     @Test("sessions can be deleted individually and all at once")

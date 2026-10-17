@@ -9,9 +9,11 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     private let modelContext: ModelContext
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let ownerUserID: UUID?
 
     public init(
-        inMemory: Bool = false
+        inMemory: Bool = false,
+        ownerUserID: UUID? = nil
     ) throws {
         let configuration = ModelConfiguration(
             isStoredInMemoryOnly: inMemory
@@ -26,6 +28,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
             modelContainer
         )
 
+        self.ownerUserID = ownerUserID
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
     }
@@ -53,9 +56,10 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     public func fetchSession(
         id: UUID
     ) async throws -> StoredWorkoutSession? {
+        let ownerUserID = self.ownerUserID
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
-                $0.sessionID == id
+                $0.sessionID == id && $0.ownerUserID == ownerUserID
             }
         )
 
@@ -71,7 +75,10 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func fetchSessions() async throws -> [StoredWorkoutSession] {
-        var descriptor = FetchDescriptor<WorkoutSessionEntity>()
+        let ownerUserID = self.ownerUserID
+        var descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate { $0.ownerUserID == ownerUserID }
+        )
         descriptor.sortBy = [
             SortDescriptor(
                 \.startedAt,
@@ -86,12 +93,14 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func fetchIncompleteSessions() async throws -> [StoredWorkoutSession] {
+        let ownerUserID = self.ownerUserID
         let inProgressRawValue =
             WorkoutSessionPersistenceState.inProgress.rawValue
 
         var descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
-                $0.persistenceStateRawValue == inProgressRawValue
+                $0.persistenceStateRawValue == inProgressRawValue &&
+                $0.ownerUserID == ownerUserID
             }
         )
 
@@ -112,6 +121,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         from startDate: Date,
         to endDate: Date
     ) async throws -> [StoredWorkoutSession] {
+        let ownerUserID = self.ownerUserID
         guard startDate < endDate else {
             return []
         }
@@ -122,6 +132,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         var descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
                 $0.persistenceStateRawValue == completedRawValue &&
+                $0.ownerUserID == ownerUserID &&
                 $0.startedAt >= startDate &&
                 $0.startedAt < endDate
             }
@@ -140,12 +151,15 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         .map(makeStoredSession)
     }
 
-    /// Returns only completed sessions that still require a server upload.
+    /// Only explicitly owned records can ever be uploaded.
+    /// Legacy records with no owner are excluded.
     public func fetchPendingUploads() async throws -> [StoredWorkoutSession] {
+        guard let ownerUserID else { return [] }
         let completed = WorkoutSessionPersistenceState.completed.rawValue
         let synced = WorkoutSessionSyncState.synced.rawValue
         var descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
+                $0.ownerUserID == ownerUserID &&
                 $0.persistenceStateRawValue == completed &&
                 $0.syncStateRawValue != synced
             }
@@ -154,13 +168,17 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         return try modelContext.fetch(descriptor).map(makeStoredSession)
     }
 
-    /// Changes sync metadata without altering the full-fidelity workout payload.
     public func updateSyncState(
         for sessionID: UUID,
         to state: WorkoutSessionSyncState
     ) async throws {
+        guard let ownerUserID else {
+            throw WorkoutStorageError.accountRequired
+        }
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
-            predicate: #Predicate { $0.sessionID == sessionID }
+            predicate: #Predicate {
+                $0.sessionID == sessionID && $0.ownerUserID == ownerUserID
+            }
         )
         guard let entity = try modelContext.fetch(descriptor).first else {
             throw WorkoutStorageError.sessionNotFound
@@ -177,6 +195,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     public func deleteSession(
         id: UUID
     ) async throws {
+        let ownerUserID = self.ownerUserID
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
                 $0.sessionID == id
@@ -193,9 +212,13 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
     }
 
     public func deleteAllSessions() async throws {
-        try modelContext.delete(
-            model: WorkoutSessionEntity.self
+        let ownerUserID = self.ownerUserID
+        let descriptor = FetchDescriptor<WorkoutSessionEntity>(
+            predicate: #Predicate { $0.ownerUserID == ownerUserID }
         )
+        for entity in try modelContext.fetch(descriptor) {
+            modelContext.delete(entity)
+        }
         try modelContext.save()
     }
 }
@@ -221,6 +244,9 @@ private extension SwiftDataWorkoutSessionRepository {
         if let entity = try modelContext.fetch(
             descriptor
         ).first {
+            guard entity.ownerUserID == ownerUserID else {
+                throw WorkoutStorageError.ownerMismatch
+            }
             entity.workoutID = session.workout.workoutID
             entity.workoutName = session.workout.name
             entity.startedAt = session.timing.startDate
@@ -233,6 +259,7 @@ private extension SwiftDataWorkoutSessionRepository {
             modelContext.insert(
                 WorkoutSessionEntity(
                     sessionID: session.id,
+                    ownerUserID: ownerUserID,
                     workoutID: session.workout.workoutID,
                     workoutName: session.workout.name,
                     startedAt: session.timing.startDate,
@@ -280,4 +307,6 @@ public enum WorkoutStorageError: Error, Equatable {
     case invalidStoredMetadata
     case sessionNotFound
     case sessionNotCompleted
+    case accountRequired
+    case ownerMismatch
 }
