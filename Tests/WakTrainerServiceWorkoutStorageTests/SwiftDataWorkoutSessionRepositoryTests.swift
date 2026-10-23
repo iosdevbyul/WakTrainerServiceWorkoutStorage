@@ -242,7 +242,7 @@ struct SwiftDataWorkoutSessionRepositoryTests {
         try await repository.deleteSession(id: first.id)
         #expect(try await repository.fetchSession(id: first.id) == nil)
         #expect(try await repository.fetchSession(id: second.id) != nil)
-        #expect(try await repository.fetchPendingUploads().map(\\.session.id) == [second.id])
+        #expect(try await repository.fetchPendingUploads().map(\.session.id) == [second.id])
     }
 
     @Test("sessions can be deleted individually and all at once")
