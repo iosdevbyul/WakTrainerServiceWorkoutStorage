@@ -225,6 +225,26 @@ struct SwiftDataWorkoutSessionRepositoryTests {
         #expect(try await repository.fetchSession(id: session.id) != nil)
     }
 
+    @Test("owned session deletion preserves other owned sessions")
+    func deletesOnlyRequestedOwnedSession() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(
+            inMemory: true,
+            ownerUserID: UUID()
+        )
+        let first = makeSession()
+        let second = makeSession(id: UUID())
+        try await repository.saveCompleted(first)
+        try await repository.saveCompleted(second)
+
+        try await repository.deleteSession(id: UUID())
+        #expect(try await repository.fetchSessions().count == 2)
+
+        try await repository.deleteSession(id: first.id)
+        #expect(try await repository.fetchSession(id: first.id) == nil)
+        #expect(try await repository.fetchSession(id: second.id) != nil)
+        #expect(try await repository.fetchPendingUploads().map(\\.session.id) == [second.id])
+    }
+
     @Test("sessions can be deleted individually and all at once")
     func deletesSessions() async throws {
         let repository = try SwiftDataWorkoutSessionRepository(
