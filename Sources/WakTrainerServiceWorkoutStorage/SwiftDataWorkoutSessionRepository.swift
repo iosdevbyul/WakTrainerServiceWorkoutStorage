@@ -198,7 +198,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         let ownerUserID = self.ownerUserID
         let descriptor = FetchDescriptor<WorkoutSessionEntity>(
             predicate: #Predicate {
-                $0.sessionID == id
+                $0.sessionID == id && $0.ownerUserID == ownerUserID
             }
         )
 
