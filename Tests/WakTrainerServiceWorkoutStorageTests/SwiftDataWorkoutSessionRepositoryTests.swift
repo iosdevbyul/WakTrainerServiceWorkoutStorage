@@ -213,6 +213,58 @@ struct SwiftDataWorkoutSessionRepositoryTests {
         }
     }
 
+    @Test("delayed sync preserves HealthKit and GPS acquisition instants")
+    func delayedSyncPreservesMeasurementTimestamps() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(
+            inMemory: true,
+            ownerUserID: UUID()
+        )
+        let measuredAt = try #require(
+            ISO8601DateFormatter().date(from: "2026-10-24T23:00:00Z")
+        )
+        var session = makeSession(startedAt: measuredAt)
+        let sampleStart = measuredAt.addingTimeInterval(30)
+        let sampleEnd = sampleStart.addingTimeInterval(5)
+        session.health.samples = [
+            WorkoutHealthMetricSample(
+                metric: .heartRate,
+                startDate: sampleStart,
+                endDate: sampleEnd,
+                value: 142,
+                unit: "count/min"
+            )
+        ]
+
+        try await repository.saveCompleted(session)
+        let initial = try #require(
+            try await repository.fetchSession(id: session.id)
+        )
+        let originalUpdatedAt = initial.updatedAt
+
+        // A later failed upload and successful retry must not change
+        // the original acquisition times of workout, HR, or GPS.
+        try await repository.updateSyncState(for: session.id, to: .failed)
+        let pending = try #require(
+            try await repository.fetchPendingUploads().first
+        )
+        #expect(pending.session == session)
+        #expect(pending.session.health.samples[0].startDate == sampleStart)
+        #expect(pending.session.health.samples[0].endDate == sampleEnd)
+        #expect(pending.session.route.map(\.timestamp) == [
+            measuredAt, measuredAt.addingTimeInterval(60)
+        ])
+
+        try await repository.updateSyncState(for: session.id, to: .synced)
+        let synced = try #require(
+            try await repository.fetchSession(id: session.id)
+        )
+        #expect(synced.session == session)
+        #expect(synced.session.timing.startDate == measuredAt)
+        #expect(synced.session.health.samples[0].startDate == sampleStart)
+        #expect(synced.session.route.first?.timestamp == measuredAt)
+        #expect(synced.updatedAt >= originalUpdatedAt)
+    }
+
     @Test("legacy sessions remain local and cannot be uploaded without an owner")
     func legacySessionIsNotUploadable() async throws {
         let repository = try SwiftDataWorkoutSessionRepository(inMemory: true)
