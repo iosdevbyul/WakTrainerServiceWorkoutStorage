@@ -4,7 +4,7 @@ import WakTrainerCoreModels
 import WakTrainerDomainWorkout
 
 @MainActor
-public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
+public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository, WorkoutPauseRestoreStorage {
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
     private let encoder: JSONEncoder
@@ -31,6 +31,54 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository {
         self.ownerUserID = ownerUserID
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
+    }
+
+    public func fetchCompletedSession(id: UUID) async throws -> WorkoutSession? {
+        guard let stored = try await fetchSession(id: id),
+              stored.persistenceState == .completed else {
+            return nil
+        }
+        return stored.session
+    }
+
+    /// Compare and replace within one SwiftData ModelContext transaction.
+    /// All writes to this repository must use the same context to preserve
+    /// serialization; SwiftData does not expose a cross-process SQL CAS here.
+    public func compareAndReplaceCompleted(
+        expected: WorkoutSession,
+        replacement: WorkoutSession
+    ) async throws -> Bool {
+        guard expected.id == replacement.id,
+              replacement.timing.endDate != nil else {
+            return false
+        }
+        let sessionID = expected.id
+        let owner = ownerUserID
+        let completed = WorkoutSessionPersistenceState.completed.rawValue
+        let replacementPayload = try encoder.encode(replacement)
+
+        return try modelContext.transaction {
+            let descriptor = FetchDescriptor<WorkoutSessionEntity>(
+                predicate: #Predicate {
+                    $0.sessionID == sessionID && $0.ownerUserID == owner
+                }
+            )
+            guard let entity = try modelContext.fetch(descriptor).first,
+                  entity.persistenceStateRawValue == completed,
+                  try decoder.decode(WorkoutSession.self, from: entity.payload) == expected else {
+                return false
+            }
+
+            entity.payload = replacementPayload
+            entity.workoutID = replacement.workout.workoutID
+            entity.workoutName = replacement.workout.name
+            entity.startedAt = replacement.timing.startDate
+            entity.endedAt = replacement.timing.endDate
+            entity.syncStateRawValue = WorkoutSessionSyncState.pending.rawValue
+            entity.updatedAt = Date()
+            try modelContext.save()
+            return true
+        }
     }
 
     public func saveCheckpoint(
