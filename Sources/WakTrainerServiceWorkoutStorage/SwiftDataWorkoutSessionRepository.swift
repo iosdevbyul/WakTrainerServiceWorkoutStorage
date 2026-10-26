@@ -57,7 +57,8 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository, 
         let completed = WorkoutSessionPersistenceState.completed.rawValue
         let replacementPayload = try encoder.encode(replacement)
 
-        return try modelContext.transaction {
+        var didReplace = false
+        try modelContext.transaction {
             let descriptor = FetchDescriptor<WorkoutSessionEntity>(
                 predicate: #Predicate {
                     $0.sessionID == sessionID && $0.ownerUserID == owner
@@ -66,7 +67,7 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository, 
             guard let entity = try modelContext.fetch(descriptor).first,
                   entity.persistenceStateRawValue == completed,
                   try decoder.decode(WorkoutSession.self, from: entity.payload) == expected else {
-                return false
+                return
             }
 
             entity.payload = replacementPayload
@@ -77,8 +78,9 @@ public final class SwiftDataWorkoutSessionRepository: WorkoutSessionRepository, 
             entity.syncStateRawValue = WorkoutSessionSyncState.pending.rawValue
             entity.updatedAt = Date()
             try modelContext.save()
-            return true
+            didReplace = true
         }
+        return didReplace
     }
 
     public func saveCheckpoint(
