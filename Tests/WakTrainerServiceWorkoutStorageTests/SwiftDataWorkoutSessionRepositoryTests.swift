@@ -9,6 +9,71 @@ import WakTrainerDomainWorkout
 @Suite("SwiftDataWorkoutSessionRepository")
 struct SwiftDataWorkoutSessionRepositoryTests {
 
+    @Test("SwiftData restore and undo preserve original session and mark pending sync")
+    func persistedRestoreUndo() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(
+            inMemory: true,
+            ownerUserID: UUID()
+        )
+        var session = makeSession()
+        let start = session.timing.startDate
+        session.timing.activeDuration = 480
+        session.timing.pausedDuration = 120
+        session.timing.pauseIntervals = [
+            WorkoutPauseInterval(
+                startDate: start.addingTimeInterval(200),
+                endDate: start.addingTimeInterval(320)
+            )
+        ]
+        try await repository.saveCompleted(session)
+        try await repository.updateSyncState(for: session.id, to: .synced)
+        let service = WorkoutPauseRestorePersistenceService(storage: repository)
+        let token = try await service.restore(
+            sessionID: session.id,
+            from: start.addingTimeInterval(220),
+            to: start.addingTimeInterval(280)
+        )
+        let restored = try #require(try await repository.fetchSession(id: session.id))
+        #expect(restored.session == token.after)
+        #expect(restored.session.timing.activeDuration == 540)
+        #expect(restored.syncState == .pending)
+        try await service.undo(token)
+        let undone = try #require(try await repository.fetchSession(id: session.id))
+        #expect(undone.session == session)
+        #expect(undone.syncState == .pending)
+    }
+
+    @Test("Stale SwiftData restore snapshot cannot overwrite a newer edit")
+    func compareRejectsStaleSnapshot() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(inMemory: true)
+        let original = makeSession()
+        try await repository.saveCompleted(original)
+        var changed = original
+        changed.timing.activeDuration += 1
+        try await repository.saveCompleted(changed)
+        #expect(try await repository.compareAndReplaceCompleted(
+            expected: original,
+            replacement: original
+        ) == false)
+        #expect(try await repository.fetchSession(id: original.id)?.session == changed)
+    }
+
+    @Test("Only completed sessions owned by this repository may be restored")
+    func restoreRejectsIncompleteAndMissingSessions() async throws {
+        let repository = try SwiftDataWorkoutSessionRepository(
+            inMemory: true,
+            ownerUserID: UUID()
+        )
+        let incomplete = makeSession(completed: false)
+        try await repository.saveCheckpoint(incomplete)
+        #expect(try await repository.fetchCompletedSession(id: incomplete.id) == nil)
+        #expect(try await repository.compareAndReplaceCompleted(
+            expected: incomplete,
+            replacement: incomplete
+        ) == false)
+        #expect(try await repository.fetchCompletedSession(id: UUID()) == nil)
+    }
+
     @Test("checkpoint persists the complete WorkoutSession payload")
     func checkpointPersistsSession() async throws {
         let repository = try SwiftDataWorkoutSessionRepository(
